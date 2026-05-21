@@ -28,6 +28,12 @@ const days = ["Sábado", "Domingo"];
 const blocks = ["Mañana", "Tarde", "Noche"];
 const tones = ["parchment", "rose", "sage", "lavender", "gold"];
 
+const CARD_W = 204;
+const CARD_H = 176;
+const GAP = 14;
+const TOP_PAD = 54;
+const SIDE_PAD = 12;
+
 function generateTimes() {
   const options = [];
   for (let hour = 0; hour <= 23; hour++) {
@@ -49,8 +55,8 @@ const initialNotes = [
     title: "Empezar el día juntos",
     details: "Desayuno, café o algo tranquilo para arrancar bonito.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "parchment",
   },
   {
@@ -61,8 +67,8 @@ const initialNotes = [
     title: "Plan diferente",
     details: "Escape room, casa de terror, arcade, museo o algo fuera de lo normal.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "rose",
   },
   {
@@ -73,8 +79,8 @@ const initialNotes = [
     title: "Cena / noche",
     details: "Lugar bonito, caminar un rato y cerrar el sábado sin apuro.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "lavender",
   },
   {
@@ -82,11 +88,11 @@ const initialNotes = [
     day: "Domingo",
     block: "Mañana",
     time: "10:00",
-    title: "Brunch o desayuno tarde",
+    title: "Brunch",
     details: "Algo suave, sin correr. Elegimos juntos.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "sage",
   },
   {
@@ -97,8 +103,8 @@ const initialNotes = [
     title: "Plan libre",
     details: "Película, café, caminar, cocinar algo o improvisar bien.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "gold",
   },
   {
@@ -109,8 +115,8 @@ const initialNotes = [
     title: "Cierre del finde",
     details: "Cena ligera, postre o quedarnos conversando.",
     done: false,
-    x: 16,
-    y: 58,
+    x: 12,
+    y: 54,
     tone: "parchment",
   },
 ];
@@ -170,16 +176,66 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function getColumns(width) {
+  if (!width) return 2;
+  return Math.max(1, Math.floor((width - SIDE_PAD * 2 + GAP) / (CARD_W + GAP)));
+}
+
+function getGridPosition(index, columns) {
+  const col = index % columns;
+  const row = Math.floor(index / columns);
+  return {
+    x: SIDE_PAD + col * (CARD_W + GAP),
+    y: TOP_PAD + row * (CARD_H + GAP),
+  };
+}
+
+function getBlockHeight(count, columns) {
+  const rows = Math.max(1, Math.ceil(count / Math.max(1, columns)));
+  return TOP_PAD + rows * CARD_H + Math.max(0, rows - 1) * GAP + 24;
+}
+
 function normalizeNote(note, index = 0) {
   return {
     ...note,
     day: days.includes(note.day) ? note.day : index < 3 ? "Sábado" : "Domingo",
     block: blocks.includes(note.block) ? note.block : "Mañana",
     time: timeOptions.includes(note.time) ? note.time : "10:00",
-    x: typeof note.x === "number" ? clamp(note.x, 10, 360) : 16,
-    y: typeof note.y === "number" ? clamp(note.y, 54, 260) : 58,
+    x: typeof note.x === "number" ? clamp(note.x, SIDE_PAD, 420) : SIDE_PAD,
+    y: typeof note.y === "number" ? clamp(note.y, TOP_PAD, 500) : TOP_PAD,
     tone: tones.includes(note.tone) ? note.tone : "parchment",
   };
+}
+
+function layoutNotes(notes, widthByKey = {}) {
+  const grouped = {};
+
+  for (const note of notes.map(normalizeNote)) {
+    const key = `${note.day}-${note.block}`;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(note);
+  }
+
+  const laidOut = [];
+
+  Object.entries(grouped).forEach(([key, list]) => {
+    const width = widthByKey[key] || 680;
+    const columns = getColumns(width);
+
+    list
+      .slice()
+      .sort((a, b) => {
+        const byTime = a.time.localeCompare(b.time);
+        if (byTime !== 0) return byTime;
+        return String(a.id).localeCompare(String(b.id));
+      })
+      .forEach((note, index) => {
+        const pos = getGridPosition(index, columns);
+        laidOut.push({ ...note, x: pos.x, y: pos.y });
+      });
+  });
+
+  return laidOut;
 }
 
 function StickyNote({ note, areaRef, onUpdate, onToggle, onDelete, onMove }) {
@@ -207,19 +263,17 @@ function StickyNote({ note, areaRef, onUpdate, onToggle, onDelete, onMove }) {
         if (!area) return;
 
         const rect = area.getBoundingClientRect();
-        const noteWidth = window.innerWidth < 760 ? Math.min(230, window.innerWidth - 76) : 244;
-        const noteHeight = 228;
 
         const nextX = clamp(
           Math.round(note.x + info.offset.x),
-          8,
-          Math.max(8, rect.width - noteWidth - 8)
+          SIDE_PAD,
+          Math.max(SIDE_PAD, rect.width - CARD_W - SIDE_PAD)
         );
 
         const nextY = clamp(
           Math.round(note.y + info.offset.y),
-          52,
-          Math.max(52, rect.height - noteHeight - 8)
+          TOP_PAD,
+          Math.max(TOP_PAD, rect.height - CARD_H - 12)
         );
 
         onMove(note.id, nextX, nextY);
@@ -269,19 +323,34 @@ function StickyNote({ note, areaRef, onUpdate, onToggle, onDelete, onMove }) {
         value={local.details}
         onChange={(e) => changeField("details", e.target.value)}
         className="note-details"
-        placeholder="Notas, lugar, reserva, opción A/B..."
+        placeholder="Notas, lugar, reserva..."
       />
 
       <div className="note-footer">
-        <Feather size={14} />
+        <Feather size={13} />
         <span>{note.day} · {note.block}</span>
       </div>
     </motion.div>
   );
 }
 
-function BlockArea({ day, block, notes, children, onAdd }) {
+function BlockArea({ day, block, notes, children, onAdd, onOrganize }) {
   const areaRef = useRef(null);
+  const [width, setWidth] = useState(680);
+
+  useEffect(() => {
+    if (!areaRef.current) return;
+
+    const update = () => setWidth(areaRef.current?.getBoundingClientRect().width || 680);
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(areaRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const columns = getColumns(width);
+  const height = getBlockHeight(notes.length, columns);
 
   return (
     <div className="block-card">
@@ -294,14 +363,17 @@ function BlockArea({ day, block, notes, children, onAdd }) {
         </div>
         <div className="block-actions">
           <span>{notes.filter((n) => n.done).length}/{notes.length}</span>
-          <button onClick={() => onAdd(day, block)} className="mini-add" aria-label={`Agregar en ${block}`}>
+          <button onClick={onOrganize} className="mini-organize" aria-label="Ordenar bloque">
+            Ordenar
+          </button>
+          <button onClick={() => onAdd(day, block, width)} className="mini-add" aria-label={`Agregar en ${block}`}>
             <Plus size={15} />
           </button>
         </div>
       </div>
 
-      <div ref={areaRef} className="block-area">
-        <div className="drop-label">Zona protegida</div>
+      <div ref={areaRef} className="block-area" style={{ height }}>
+        <div className="drop-label">Se expande solo</div>
         {React.Children.map(children, (child) =>
           React.isValidElement(child) ? React.cloneElement(child, { areaRef }) : child
         )}
@@ -310,7 +382,7 @@ function BlockArea({ day, block, notes, children, onAdd }) {
   );
 }
 
-function DayColumn({ day, notes, children, onAdd }) {
+function DayColumn({ day, notes, children, onAdd, onOrganizeBlock }) {
   const total = notes.length;
   const done = notes.filter((n) => n.done).length;
 
@@ -332,6 +404,7 @@ function DayColumn({ day, notes, children, onAdd }) {
             block={block}
             notes={notes.filter((n) => n.block === block)}
             onAdd={onAdd}
+            onOrganize={() => onOrganizeBlock(day, block)}
           >
             {children(block)}
           </BlockArea>
@@ -421,8 +494,30 @@ export default function App() {
     });
   };
 
-  const addNote = (day, block) => {
+  const organizeBlock = (day, block) => {
+    setNotes((current) => {
+      const blockNotes = current.filter((n) => n.day === day && n.block === block);
+      const otherNotes = current.filter((n) => !(n.day === day && n.block === block));
+      const organized = layoutNotes(blockNotes);
+      const next = [...otherNotes, ...organized];
+      persistNotes(next);
+      return next;
+    });
+  };
+
+  const organizeAll = () => {
+    setNotes((current) => {
+      const next = layoutNotes(current);
+      persistNotes(next);
+      return next;
+    });
+  };
+
+  const addNote = (day, block, width = 680) => {
     const existing = notes.filter((n) => n.day === day && n.block === block);
+    const columns = getColumns(width);
+    const pos = getGridPosition(existing.length, columns);
+
     const note = {
       id: String(Date.now()),
       day,
@@ -431,8 +526,8 @@ export default function App() {
       title: "Nuevo plan",
       details: "Escribe aquí la idea.",
       done: false,
-      x: 14 + (existing.length % 2) * 252,
-      y: 58 + Math.floor(existing.length / 2) * 232,
+      x: pos.x,
+      y: pos.y,
       tone: tones[notes.length % tones.length],
     };
 
@@ -490,7 +585,8 @@ export default function App() {
           </div>
 
           <div className="legend">
-            <span><b>Tip:</b> agrega planes desde cada bloque y usa la hora en formato 24h.</span>
+            <button className="organize-all" onClick={organizeAll}>Ordenar todo</button>
+            <span><b>Tip:</b> si se desordena, usa “Ordenar”.</span>
           </div>
         </div>
 
@@ -498,7 +594,13 @@ export default function App() {
           {days.map((day) => {
             const dayNotes = notes.filter((n) => n.day === day);
             return (
-              <DayColumn key={day} day={day} notes={dayNotes} onAdd={addNote}>
+              <DayColumn
+                key={day}
+                day={day}
+                notes={dayNotes}
+                onAdd={addNote}
+                onOrganizeBlock={organizeBlock}
+              >
                 {(block) =>
                   dayNotes
                     .filter((note) => note.block === block)
