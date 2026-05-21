@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regla simple para este mini proyecto.
+    // Cambia el ID si cambias VITE_BOARD_ID.
+    match /boards/ismael-gabriela-magical-weekend-7q2k9 {
+      allow read, write: if true;
+    }
+
+    // Bloquea todo lo demás.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
