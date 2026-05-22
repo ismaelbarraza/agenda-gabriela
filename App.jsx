@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { Plus, Trash2, Sparkles, Wand2, CheckCircle2, Circle, Feather, Heart, Loader2, AlertTriangle, Sun, Moon, Stars } from "lucide-react";
+import { motion, useDragControls } from "framer-motion";
+import { Plus, Trash2, Sparkles, Wand2, CheckCircle2, Circle, Feather, Heart, Loader2, AlertTriangle, Sun, Moon, Stars, Move } from "lucide-react";
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { BOARD_ID, db, firebaseReady, missingFirebaseKeys } from "./firebase";
 
@@ -22,12 +22,12 @@ const timeOptions = Array.from({ length: 48 }, (_, i) => {
 });
 
 const initialNotes = [
-  { id: "1", day: "Sábado", block: "Mañana", time: "09:00", title: "Empezar el día juntos", details: "Desayuno, café o algo tranquilo para arrancar bonito.", done: false, x: 14, y: 54, tone: "parchment" },
-  { id: "2", day: "Sábado", block: "Tarde", time: "15:00", title: "Plan diferente", details: "Escape room, casa de terror, arcade, museo o algo fuera de lo normal.", done: false, x: 14, y: 54, tone: "rose" },
-  { id: "3", day: "Sábado", block: "Noche", time: "20:00", title: "Cena / noche", details: "Lugar bonito, caminar un rato y cerrar el sábado sin apuro.", done: false, x: 14, y: 54, tone: "lavender" },
-  { id: "4", day: "Domingo", block: "Mañana", time: "10:00", title: "Brunch", details: "Algo suave, sin correr. Elegimos juntos.", done: false, x: 14, y: 54, tone: "sage" },
-  { id: "5", day: "Domingo", block: "Tarde", time: "16:00", title: "Plan libre", details: "Película, café, caminar, cocinar algo o improvisar bien.", done: false, x: 14, y: 54, tone: "gold" },
-  { id: "6", day: "Domingo", block: "Noche", time: "20:30", title: "Cierre del finde", details: "Cena ligera, postre o quedarnos conversando.", done: false, x: 14, y: 54, tone: "parchment" },
+  { id: "1", day: "Sábado", block: "Mañana", slot: 0, time: "09:00", title: "Empezar el día juntos", details: "Desayuno, café o algo tranquilo para arrancar bonito.", done: false, tone: "parchment" },
+  { id: "2", day: "Sábado", block: "Tarde", slot: 0, time: "15:00", title: "Plan diferente", details: "Escape room, casa de terror, arcade, museo o algo fuera de lo normal.", done: false, tone: "rose" },
+  { id: "3", day: "Sábado", block: "Noche", slot: 0, time: "20:00", title: "Cena / noche", details: "Lugar bonito, caminar un rato y cerrar el sábado sin apuro.", done: false, tone: "lavender" },
+  { id: "4", day: "Domingo", block: "Mañana", slot: 0, time: "10:00", title: "Brunch", details: "Algo suave, sin correr. Elegimos juntos.", done: false, tone: "sage" },
+  { id: "5", day: "Domingo", block: "Tarde", slot: 0, time: "16:00", title: "Plan libre", details: "Película, café, caminar, cocinar algo o improvisar bien.", done: false, tone: "gold" },
+  { id: "6", day: "Domingo", block: "Noche", slot: 0, time: "20:30", title: "Cierre del finde", details: "Cena ligera, postre o quedarnos conversando.", done: false, tone: "parchment" },
 ];
 
 const toneClass = {
@@ -56,10 +56,10 @@ function getGridPosition(index, columns) {
   };
 }
 
-function getIndexFromXY(x, y, columns) {
+function getIndexFromXY(x, y, columns, maxIndex) {
   const col = clamp(Math.round((x - SIDE_PAD) / (CARD_W + GAP)), 0, columns - 1);
   const row = Math.max(0, Math.round((y - TOP_PAD) / (CARD_H + GAP)));
-  return row * columns + col;
+  return clamp(row * columns + col, 0, maxIndex);
 }
 
 function getBlockHeight(count, columns) {
@@ -73,25 +73,24 @@ function normalizeNote(note, index = 0) {
     day: days.includes(note.day) ? note.day : index < 3 ? "Sábado" : "Domingo",
     block: blocks.includes(note.block) ? note.block : "Mañana",
     time: timeOptions.includes(note.time) ? note.time : "10:00",
-    x: typeof note.x === "number" ? note.x : SIDE_PAD,
-    y: typeof note.y === "number" ? note.y : TOP_PAD,
     tone: tones.includes(note.tone) ? note.tone : "parchment",
+    slot: Number.isFinite(note.slot) ? note.slot : index,
   };
 }
 
-function sortNotes(list) {
+function orderBlockNotes(list) {
   return list.slice().sort((a, b) => {
+    const sa = Number.isFinite(a.slot) ? a.slot : 9999;
+    const sb = Number.isFinite(b.slot) ? b.slot : 9999;
+    if (sa !== sb) return sa - sb;
     const byTime = a.time.localeCompare(b.time);
     if (byTime !== 0) return byTime;
     return String(a.id).localeCompare(String(b.id));
   });
 }
 
-function layoutBlock(list, columns) {
-  return sortNotes(list).map((note, index) => {
-    const pos = getGridPosition(index, columns);
-    return { ...note, x: pos.x, y: pos.y };
-  });
+function relockBlock(list) {
+  return orderBlockNotes(list).map((note, index) => ({ ...note, slot: index }));
 }
 
 function MagicalBackground() {
@@ -133,8 +132,10 @@ function SetupWarning() {
   );
 }
 
-function StickyNote({ note, areaRef, columns, onUpdate, onToggle, onDelete, onDropToSlot }) {
+function StickyNote({ note, areaRef, columns, slot, onUpdate, onToggle, onDelete, onDropToSlot }) {
   const [local, setLocal] = useState(note);
+  const controls = useDragControls();
+  const pos = getGridPosition(slot, columns);
 
   useEffect(() => setLocal(note), [note]);
 
@@ -146,15 +147,17 @@ function StickyNote({ note, areaRef, columns, onUpdate, onToggle, onDelete, onDr
   return (
     <motion.div
       drag
+      dragListener={false}
+      dragControls={controls}
       dragConstraints={areaRef}
       dragElastic={0}
       dragMomentum={false}
-      animate={{ left: note.x, top: note.y }}
-      transition={{ type: "spring", stiffness: 430, damping: 34 }}
-      whileDrag={{ scale: 1.03, rotate: 0, zIndex: 20 }}
+      animate={{ left: pos.x, top: pos.y }}
+      transition={{ type: "spring", stiffness: 500, damping: 38 }}
+      whileDrag={{ scale: 1.03, zIndex: 20 }}
       onDragEnd={(_, info) => {
-        const targetIndex = getIndexFromXY(note.x + info.offset.x, note.y + info.offset.y, columns);
-        onDropToSlot(note.id, targetIndex, columns);
+        const targetIndex = getIndexFromXY(pos.x + info.offset.x, pos.y + info.offset.y, columns, 999);
+        onDropToSlot(note.id, targetIndex);
       }}
       className={`sticky-note ${toneClass[note.tone] || "note-parchment"}`}
     >
@@ -173,7 +176,18 @@ function StickyNote({ note, areaRef, columns, onUpdate, onToggle, onDelete, onDr
 
       <input value={local.title} onChange={(e) => changeField("title", e.target.value)} className={`note-title ${note.done ? "done" : ""}`} placeholder="Título del plan" />
       <textarea value={local.details} onChange={(e) => changeField("details", e.target.value)} className="note-details" placeholder="Notas, lugar, reserva..." />
-      <div className="note-footer"><Feather size={13} /><span>{note.day} · {note.block}</span></div>
+
+      <div className="note-footer">
+        <span className="note-slot"><Feather size={13} /> Slot {slot + 1}</span>
+        <button
+          className="move-handle"
+          onPointerDown={(event) => controls.start(event)}
+          aria-label="Mover post-it"
+          title="Mover"
+        >
+          <Move size={13} /> Mover
+        </button>
+      </div>
     </motion.div>
   );
 }
@@ -185,11 +199,7 @@ function SlotGuide({ count, columns }) {
       {slots.map((slot) => {
         const pos = getGridPosition(slot, columns);
         return (
-          <div
-            key={slot}
-            className="slot-guide"
-            style={{ left: pos.x, top: pos.y }}
-          >
+          <div key={slot} className="slot-guide" style={{ left: pos.x, top: pos.y }}>
             {slot + 1}
           </div>
         );
@@ -212,7 +222,8 @@ function BlockArea({ day, block, notes, children, onAdd, onOrganize }) {
   }, []);
 
   const columns = getColumns(width);
-  const height = getBlockHeight(notes.length, columns);
+  const ordered = relockBlock(notes);
+  const height = getBlockHeight(ordered.length, columns);
 
   return (
     <div className="block-card">
@@ -224,24 +235,24 @@ function BlockArea({ day, block, notes, children, onAdd, onOrganize }) {
           <span>{block}</span>
         </div>
         <div className="block-actions">
-          <span>{notes.filter((n) => n.done).length}/{notes.length}</span>
-          <button onClick={() => onOrganize(columns)} className="mini-organize" aria-label="Ordenar bloque">Ordenar</button>
-          <button onClick={() => onAdd(day, block, columns)} className="mini-add" aria-label={`Agregar en ${block}`}><Plus size={15} /></button>
+          <span>{ordered.filter((n) => n.done).length}/{ordered.length}</span>
+          <button onClick={onOrganize} className="mini-organize" aria-label="Ordenar bloque">Ordenar</button>
+          <button onClick={() => onAdd(day, block)} className="mini-add" aria-label={`Agregar en ${block}`}><Plus size={15} /></button>
         </div>
       </div>
 
       <div ref={areaRef} className="block-area" style={{ height }}>
-        <div className="drop-label">{columns === 3 ? "Slots 1 · 2 · 3" : `${columns} columna${columns > 1 ? "s" : ""}`}</div>
-        <SlotGuide count={notes.length} columns={columns} />
-        {React.Children.map(children, (child) =>
-          React.isValidElement(child) ? React.cloneElement(child, { areaRef, columns }) : child
+        <div className="drop-label">{columns === 3 ? "Slots fijos 1 · 2 · 3" : `${columns} columna${columns > 1 ? "s" : ""}`}</div>
+        <SlotGuide count={ordered.length} columns={columns} />
+        {React.Children.map(children(ordered, columns), (child) =>
+          React.isValidElement(child) ? React.cloneElement(child, { areaRef }) : child
         )}
       </div>
     </div>
   );
 }
 
-function DayColumn({ day, notes, children, onAdd, onOrganizeBlock }) {
+function DayColumn({ day, notes, renderBlockNotes, onAdd, onOrganizeBlock }) {
   const total = notes.length;
   const done = notes.filter((n) => n.done).length;
 
@@ -260,9 +271,9 @@ function DayColumn({ day, notes, children, onAdd, onOrganizeBlock }) {
             block={block}
             notes={notes.filter((n) => n.block === block)}
             onAdd={onAdd}
-            onOrganize={(columns) => onOrganizeBlock(day, block, columns)}
+            onOrganize={() => onOrganizeBlock(day, block)}
           >
-            {children(block)}
+            {(ordered, columns) => renderBlockNotes(day, block, ordered, columns)}
           </BlockArea>
         ))}
       </div>
@@ -329,42 +340,37 @@ export default function App() {
     });
   };
 
-  const dropToSlot = (id, targetIndex, columns) => {
+  const dropToSlot = (id, targetIndex) => {
     setNotes((current) => {
       const dragged = current.find((n) => n.id === id);
       if (!dragged) return current;
 
-      const sourceIndex = getIndexFromXY(dragged.x, dragged.y, columns);
-      const targetPos = getGridPosition(targetIndex, columns);
-      const sourcePos = getGridPosition(sourceIndex, columns);
+      const blockNotes = relockBlock(current.filter((n) => n.day === dragged.day && n.block === dragged.block));
+      const max = blockNotes.length - 1;
+      const safeTarget = clamp(targetIndex, 0, max);
+      const source = blockNotes.findIndex((n) => n.id === id);
+      if (source < 0 || source === safeTarget) return current;
 
-      const targetNote = current.find((n) => {
-        if (n.id === id) return false;
-        if (n.day !== dragged.day || n.block !== dragged.block) return false;
-        const noteIndex = getIndexFromXY(n.x, n.y, columns);
-        return noteIndex === targetIndex;
-      });
+      const reordered = blockNotes.slice();
+      const temp = reordered[source];
+      reordered[source] = reordered[safeTarget];
+      reordered[safeTarget] = temp;
 
-      const next = current.map((n) => {
-        if (n.id === id) return { ...n, x: targetPos.x, y: targetPos.y };
-        if (targetNote && n.id === targetNote.id) return { ...n, x: sourcePos.x, y: sourcePos.y };
-        return n;
-      });
+      const locked = reordered.map((n, index) => ({ ...n, slot: index }));
+      const rest = current.filter((n) => !(n.day === dragged.day && n.block === dragged.block));
+      const next = [...rest, ...locked];
 
       persistNotes(next);
       return next;
     });
   };
 
-  const organizeBlock = (day, block, columns = 3) => {
+  const organizeBlock = (day, block) => {
     setNotes((current) => {
       const blockNotes = current.filter((n) => n.day === day && n.block === block);
-      const otherNotes = current.filter((n) => !(n.day === day && n.block === block));
-      const organized = sortNotes(blockNotes).map((note, index) => {
-        const pos = getGridPosition(index, columns);
-        return { ...note, x: pos.x, y: pos.y };
-      });
-      const next = [...otherNotes, ...organized];
+      const rest = current.filter((n) => !(n.day === day && n.block === block));
+      const locked = relockBlock(blockNotes);
+      const next = [...rest, ...locked];
       persistNotes(next);
       return next;
     });
@@ -376,11 +382,7 @@ export default function App() {
       for (const day of days) {
         for (const block of blocks) {
           const blockNotes = current.filter((n) => n.day === day && n.block === block);
-          const organized = sortNotes(blockNotes).map((note, index) => {
-            const pos = getGridPosition(index, 3);
-            return { ...note, x: pos.x, y: pos.y };
-          });
-          next = [...next, ...organized];
+          next = [...next, ...relockBlock(blockNotes)];
         }
       }
       persistNotes(next);
@@ -388,20 +390,17 @@ export default function App() {
     });
   };
 
-  const addNote = (day, block, columns = 3) => {
+  const addNote = (day, block) => {
     const existing = notes.filter((n) => n.day === day && n.block === block);
-    const pos = getGridPosition(existing.length, columns);
-
     const note = {
       id: String(Date.now()),
       day,
       block,
+      slot: existing.length,
       time: block === "Mañana" ? "10:00" : block === "Tarde" ? "16:00" : "20:00",
       title: "Nuevo plan",
       details: "Escribe aquí la idea.",
       done: false,
-      x: pos.x,
-      y: pos.y,
       tone: tones[notes.length % tones.length],
     };
 
@@ -438,25 +437,34 @@ export default function App() {
 
         <div className="toolbar">
           <div className="toolbar-copy"><Heart size={16} /><span>{loaded ? "Conectado en tiempo real" : "Cargando agenda..."}{saving && <><Loader2 className="spin" size={14} /> Guardando</>}{lastSaved && !saving ? ` · Guardado ${lastSaved}` : ""}</span></div>
-          <div className="legend"><button className="organize-all" onClick={organizeAll}>Ordenar todo</button><span><b>Modo slots:</b> arrastra al puesto deseado y se intercambian.</span></div>
+          <div className="legend"><button className="organize-all" onClick={organizeAll}>Bloquear en slots</button><span><b>Celular:</b> usa el botón “Mover” del post-it; fuera de ese botón puedes scrollear.</span></div>
         </div>
 
         <div className="planner-grid">
           {days.map((day) => {
             const dayNotes = notes.filter((n) => n.day === day);
             return (
-              <DayColumn key={day} day={day} notes={dayNotes} onAdd={addNote} onOrganizeBlock={organizeBlock}>
-                {(block) => dayNotes.filter((note) => note.block === block).map((note) => (
-                  <StickyNote
-                    key={note.id}
-                    note={note}
-                    onUpdate={updateNote}
-                    onToggle={toggleNote}
-                    onDelete={deleteNote}
-                    onDropToSlot={dropToSlot}
-                  />
-                ))}
-              </DayColumn>
+              <DayColumn
+                key={day}
+                day={day}
+                notes={dayNotes}
+                onAdd={addNote}
+                onOrganizeBlock={organizeBlock}
+                renderBlockNotes={(renderDay, block, ordered, columns) =>
+                  ordered.map((note, index) => (
+                    <StickyNote
+                      key={note.id}
+                      note={note}
+                      slot={index}
+                      columns={columns}
+                      onUpdate={updateNote}
+                      onToggle={toggleNote}
+                      onDelete={deleteNote}
+                      onDropToSlot={dropToSlot}
+                    />
+                  ))
+                }
+              />
             );
           })}
         </div>
