@@ -1,19 +1,27 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useDragControls } from "framer-motion";
-import { Plus, Trash2, Sparkles, Wand2, CheckCircle2, Circle, Feather, Heart, Loader2, AlertTriangle, Sun, Moon, Stars, Move } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  Plus,
+  Trash2,
+  Sparkles,
+  Wand2,
+  CheckCircle2,
+  Circle,
+  Feather,
+  Heart,
+  Loader2,
+  AlertTriangle,
+  Sun,
+  Moon,
+  Stars,
+  ArrowUpDown,
+} from "lucide-react";
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { BOARD_ID, db, firebaseReady, missingFirebaseKeys } from "./firebase";
 
 const days = ["Sábado", "Domingo"];
 const blocks = ["Mañana", "Tarde", "Noche"];
 const tones = ["parchment", "rose", "sage", "lavender", "gold"];
-
-const CARD_W = 204;
-const CARD_H = 176;
-const GAP = 14;
-const TOP_PAD = 54;
-const SIDE_PAD = 14;
-const MAX_COLUMNS = 3;
 
 const timeOptions = Array.from({ length: 48 }, (_, i) => {
   const h = Math.floor(i / 2);
@@ -38,35 +46,6 @@ const toneClass = {
   gold: "note-gold",
 };
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getColumns(width) {
-  const possible = Math.floor((width - SIDE_PAD * 2 + GAP) / (CARD_W + GAP));
-  return clamp(Math.min(MAX_COLUMNS, possible || 1), 1, MAX_COLUMNS);
-}
-
-function getGridPosition(index, columns) {
-  const col = index % columns;
-  const row = Math.floor(index / columns);
-  return {
-    x: SIDE_PAD + col * (CARD_W + GAP),
-    y: TOP_PAD + row * (CARD_H + GAP),
-  };
-}
-
-function getIndexFromXY(x, y, columns, maxIndex) {
-  const col = clamp(Math.round((x - SIDE_PAD) / (CARD_W + GAP)), 0, columns - 1);
-  const row = Math.max(0, Math.round((y - TOP_PAD) / (CARD_H + GAP)));
-  return clamp(row * columns + col, 0, maxIndex);
-}
-
-function getBlockHeight(count, columns) {
-  const rows = Math.max(1, Math.ceil(count / Math.max(1, columns)));
-  return TOP_PAD + rows * CARD_H + Math.max(0, rows - 1) * GAP + 24;
-}
-
 function normalizeNote(note, index = 0) {
   return {
     ...note,
@@ -78,29 +57,32 @@ function normalizeNote(note, index = 0) {
   };
 }
 
-function orderBlockNotes(list) {
-  return list.slice().sort((a, b) => {
-    const sa = Number.isFinite(a.slot) ? a.slot : 9999;
-    const sb = Number.isFinite(b.slot) ? b.slot : 9999;
-    if (sa !== sb) return sa - sb;
-    const byTime = a.time.localeCompare(b.time);
-    if (byTime !== 0) return byTime;
-    return String(a.id).localeCompare(String(b.id));
-  });
-}
-
-function relockBlock(list) {
-  return orderBlockNotes(list).map((note, index) => ({ ...note, slot: index }));
+function orderedBlock(list) {
+  return list
+    .slice()
+    .sort((a, b) => {
+      const sa = Number.isFinite(a.slot) ? a.slot : 9999;
+      const sb = Number.isFinite(b.slot) ? b.slot : 9999;
+      if (sa !== sb) return sa - sb;
+      const byTime = a.time.localeCompare(b.time);
+      if (byTime !== 0) return byTime;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((note, index) => ({ ...note, slot: index }));
 }
 
 function MagicalBackground() {
-  const particles = useMemo(() => Array.from({ length: 90 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    top: `${Math.random() * 100}%`,
-    delay: Math.random() * 2.5,
-    size: Math.random() > 0.86 ? 3 : 2,
-  })), []);
+  const particles = useMemo(
+    () =>
+      Array.from({ length: 90 }, (_, i) => ({
+        id: i,
+        left: `${Math.random() * 100}%`,
+        top: `${Math.random() * 100}%`,
+        delay: Math.random() * 2.5,
+        size: Math.random() > 0.86 ? 3 : 2,
+      })),
+    []
+  );
 
   return (
     <div className="magic-bg" aria-hidden="true">
@@ -132,10 +114,8 @@ function SetupWarning() {
   );
 }
 
-function StickyNote({ note, areaRef, columns, slot, onUpdate, onToggle, onDelete, onDropToSlot }) {
+function StickyNote({ note, index, total, onUpdate, onToggle, onDelete, onSwapSlot }) {
   const [local, setLocal] = useState(note);
-  const controls = useDragControls();
-  const pos = getGridPosition(slot, columns);
 
   useEffect(() => setLocal(note), [note]);
 
@@ -146,84 +126,76 @@ function StickyNote({ note, areaRef, columns, slot, onUpdate, onToggle, onDelete
 
   return (
     <motion.div
-      drag
-      dragListener={false}
-      dragControls={controls}
-      dragConstraints={areaRef}
-      dragElastic={0}
-      dragMomentum={false}
-      animate={{ left: pos.x, top: pos.y }}
-      transition={{ type: "spring", stiffness: 500, damping: 38 }}
-      whileDrag={{ scale: 1.03, zIndex: 20 }}
-      onDragEnd={(_, info) => {
-        const targetIndex = getIndexFromXY(pos.x + info.offset.x, pos.y + info.offset.y, columns, 999);
-        onDropToSlot(note.id, targetIndex);
-      }}
+      layout
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: "spring", stiffness: 430, damping: 34 }}
       className={`sticky-note ${toneClass[note.tone] || "note-parchment"}`}
     >
       <div className="note-top">
         <button onClick={() => onToggle(note.id)} className="check-button" aria-label="Marcar">
           {note.done ? <CheckCircle2 /> : <Circle />}
         </button>
+
         <select value={local.time} onChange={(e) => changeField("time", e.target.value)} className="time-select" aria-label="Hora">
-          {timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}
+          {timeOptions.map((time) => (
+            <option key={time} value={time}>
+              {time}
+            </option>
+          ))}
         </select>
+
         <select value={local.tone} onChange={(e) => changeField("tone", e.target.value)} className="tone-select" aria-label="Color">
-          {tones.map((tone) => <option key={tone} value={tone}>{tone}</option>)}
+          {tones.map((tone) => (
+            <option key={tone} value={tone}>
+              {tone}
+            </option>
+          ))}
         </select>
-        <button onClick={() => onDelete(note.id)} className="delete-button" aria-label="Eliminar"><Trash2 /></button>
+
+        <button onClick={() => onDelete(note.id)} className="delete-button" aria-label="Eliminar">
+          <Trash2 />
+        </button>
       </div>
 
-      <input value={local.title} onChange={(e) => changeField("title", e.target.value)} className={`note-title ${note.done ? "done" : ""}`} placeholder="Título del plan" />
-      <textarea value={local.details} onChange={(e) => changeField("details", e.target.value)} className="note-details" placeholder="Notas, lugar, reserva..." />
+      <input
+        value={local.title}
+        onChange={(e) => changeField("title", e.target.value)}
+        className={`note-title ${note.done ? "done" : ""}`}
+        placeholder="Título del plan"
+      />
+
+      <textarea
+        value={local.details}
+        onChange={(e) => changeField("details", e.target.value)}
+        className="note-details"
+        placeholder="Notas, lugar, reserva..."
+      />
 
       <div className="note-footer">
-        <span className="note-slot"><Feather size={13} /> Slot {slot + 1}</span>
-        <button
-          className="move-handle"
-          onPointerDown={(event) => controls.start(event)}
-          aria-label="Mover post-it"
-          title="Mover"
+        <span className="slot-label">
+          <Feather size={13} /> Slot
+        </span>
+
+        <select
+          value={index}
+          onChange={(e) => onSwapSlot(note.id, Number(e.target.value))}
+          className="slot-select"
+          aria-label="Cambiar slot"
         >
-          <Move size={13} /> Mover
-        </button>
+          {Array.from({ length: total }, (_, i) => (
+            <option key={i} value={i}>
+              {i + 1}
+            </option>
+          ))}
+        </select>
       </div>
     </motion.div>
   );
 }
 
-function SlotGuide({ count, columns }) {
-  const slots = Array.from({ length: Math.max(count, columns) }, (_, i) => i);
-  return (
-    <>
-      {slots.map((slot) => {
-        const pos = getGridPosition(slot, columns);
-        return (
-          <div key={slot} className="slot-guide" style={{ left: pos.x, top: pos.y }}>
-            {slot + 1}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function BlockArea({ day, block, notes, children, onAdd, onOrganize }) {
-  const areaRef = useRef(null);
-  const [width, setWidth] = useState(760);
-
-  useEffect(() => {
-    if (!areaRef.current) return;
-    const update = () => setWidth(areaRef.current?.getBoundingClientRect().width || 760);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(areaRef.current);
-    return () => observer.disconnect();
-  }, []);
-
-  const columns = getColumns(width);
-  const ordered = relockBlock(notes);
-  const height = getBlockHeight(ordered.length, columns);
+function BlockArea({ day, block, notes, renderNotes, onAdd, onOrganize }) {
+  const ordered = orderedBlock(notes);
 
   return (
     <div className="block-card">
@@ -234,18 +206,29 @@ function BlockArea({ day, block, notes, children, onAdd, onOrganize }) {
           {block === "Noche" && <Moon size={16} />}
           <span>{block}</span>
         </div>
+
         <div className="block-actions">
-          <span>{ordered.filter((n) => n.done).length}/{ordered.length}</span>
-          <button onClick={onOrganize} className="mini-organize" aria-label="Ordenar bloque">Ordenar</button>
-          <button onClick={() => onAdd(day, block)} className="mini-add" aria-label={`Agregar en ${block}`}><Plus size={15} /></button>
+          <span>
+            {ordered.filter((n) => n.done).length}/{ordered.length}
+          </span>
+          <button onClick={onOrganize} className="mini-organize">
+            Ordenar
+          </button>
+          <button onClick={() => onAdd(day, block)} className="mini-add" aria-label={`Agregar en ${block}`}>
+            <Plus size={15} />
+          </button>
         </div>
       </div>
 
-      <div ref={areaRef} className="block-area" style={{ height }}>
-        <div className="drop-label">{columns === 3 ? "Slots fijos 1 · 2 · 3" : `${columns} columna${columns > 1 ? "s" : ""}`}</div>
-        <SlotGuide count={ordered.length} columns={columns} />
-        {React.Children.map(children(ordered, columns), (child) =>
-          React.isValidElement(child) ? React.cloneElement(child, { areaRef }) : child
+      <div className="real-grid-area">
+        <div className="grid-label">Slots reales: 1 · 2 · 3 / 4 · 5 · 6</div>
+
+        {ordered.length === 0 ? (
+          <div className="empty-block">Agrega un plan con +</div>
+        ) : (
+          <div className="notes-grid">
+            {renderNotes(ordered)}
+          </div>
         )}
       </div>
     </div>
@@ -259,8 +242,13 @@ function DayColumn({ day, notes, renderBlockNotes, onAdd, onOrganizeBlock }) {
   return (
     <section className="day-column">
       <div className="day-header">
-        <div className="day-title">{day === "Sábado" ? <Stars size={19} /> : <Moon size={19} />}<span>{day}</span></div>
-        <div className="day-count">{done}/{total} elegido</div>
+        <div className="day-title">
+          {day === "Sábado" ? <Stars size={19} /> : <Moon size={19} />}
+          <span>{day}</span>
+        </div>
+        <div className="day-count">
+          {done}/{total} elegido
+        </div>
       </div>
 
       <div className="day-blocks">
@@ -272,9 +260,8 @@ function DayColumn({ day, notes, renderBlockNotes, onAdd, onOrganizeBlock }) {
             notes={notes.filter((n) => n.block === block)}
             onAdd={onAdd}
             onOrganize={() => onOrganizeBlock(day, block)}
-          >
-            {(ordered, columns) => renderBlockNotes(day, block, ordered, columns)}
-          </BlockArea>
+            renderNotes={(ordered) => renderBlockNotes(day, block, ordered)}
+          />
         ))}
       </div>
     </section>
@@ -291,19 +278,29 @@ export default function App() {
   useEffect(() => {
     if (!firebaseReady || !boardDocRef) return;
 
-    const unsubscribe = onSnapshot(boardDocRef, async (snapshot) => {
-      if (!snapshot.exists()) {
-        await setDoc(boardDocRef, { notes: initialNotes, updatedAt: serverTimestamp(), title: "Gabriela e Ismael" });
-        setNotes(initialNotes);
-      } else {
-        const data = snapshot.data();
-        if (Array.isArray(data.notes)) setNotes(data.notes.map(normalizeNote));
+    const unsubscribe = onSnapshot(
+      boardDocRef,
+      async (snapshot) => {
+        if (!snapshot.exists()) {
+          await setDoc(boardDocRef, {
+            notes: initialNotes,
+            updatedAt: serverTimestamp(),
+            title: "Gabriela e Ismael",
+          });
+          setNotes(initialNotes);
+        } else {
+          const data = snapshot.data();
+          if (Array.isArray(data.notes)) {
+            setNotes(data.notes.map(normalizeNote));
+          }
+        }
+        setLoaded(true);
+      },
+      (error) => {
+        console.error(error);
+        setLoaded(true);
       }
-      setLoaded(true);
-    }, (error) => {
-      console.error(error);
-      setLoaded(true);
-    });
+    );
 
     return unsubscribe;
   }, [boardDocRef]);
@@ -334,29 +331,40 @@ export default function App() {
 
   const deleteNote = (id) => {
     setNotes((current) => {
-      const next = current.filter((n) => n.id !== id);
+      const deleted = current.find((n) => n.id === id);
+      const nextRaw = current.filter((n) => n.id !== id);
+
+      if (!deleted) {
+        persistNotes(nextRaw);
+        return nextRaw;
+      }
+
+      const rest = nextRaw.filter((n) => !(n.day === deleted.day && n.block === deleted.block));
+      const blockNotes = nextRaw.filter((n) => n.day === deleted.day && n.block === deleted.block);
+      const locked = orderedBlock(blockNotes);
+
+      const next = [...rest, ...locked];
       persistNotes(next);
       return next;
     });
   };
 
-  const dropToSlot = (id, targetIndex) => {
+  const swapSlot = (id, targetIndex) => {
     setNotes((current) => {
       const dragged = current.find((n) => n.id === id);
       if (!dragged) return current;
 
-      const blockNotes = relockBlock(current.filter((n) => n.day === dragged.day && n.block === dragged.block));
-      const max = blockNotes.length - 1;
-      const safeTarget = clamp(targetIndex, 0, max);
-      const source = blockNotes.findIndex((n) => n.id === id);
-      if (source < 0 || source === safeTarget) return current;
+      const blockNotes = orderedBlock(current.filter((n) => n.day === dragged.day && n.block === dragged.block));
+      const sourceIndex = blockNotes.findIndex((n) => n.id === id);
+
+      if (sourceIndex < 0 || sourceIndex === targetIndex) return current;
 
       const reordered = blockNotes.slice();
-      const temp = reordered[source];
-      reordered[source] = reordered[safeTarget];
-      reordered[safeTarget] = temp;
+      const temp = reordered[sourceIndex];
+      reordered[sourceIndex] = reordered[targetIndex];
+      reordered[targetIndex] = temp;
 
-      const locked = reordered.map((n, index) => ({ ...n, slot: index }));
+      const locked = reordered.map((n, i) => ({ ...n, slot: i }));
       const rest = current.filter((n) => !(n.day === dragged.day && n.block === dragged.block));
       const next = [...rest, ...locked];
 
@@ -369,7 +377,7 @@ export default function App() {
     setNotes((current) => {
       const blockNotes = current.filter((n) => n.day === day && n.block === block);
       const rest = current.filter((n) => !(n.day === day && n.block === block));
-      const locked = relockBlock(blockNotes);
+      const locked = orderedBlock(blockNotes);
       const next = [...rest, ...locked];
       persistNotes(next);
       return next;
@@ -382,7 +390,7 @@ export default function App() {
       for (const day of days) {
         for (const block of blocks) {
           const blockNotes = current.filter((n) => n.day === day && n.block === block);
-          next = [...next, ...relockBlock(blockNotes)];
+          next = [...next, ...orderedBlock(blockNotes)];
         }
       }
       persistNotes(next);
@@ -421,23 +429,50 @@ export default function App() {
   return (
     <div className="app-shell">
       <MagicalBackground />
+
       <div className="content">
         <motion.header initial={{ opacity: 0, y: -18 }} animate={{ opacity: 1, y: 0 }} className="hero">
           <div className="hero-copy">
-            <div className="eyebrow"><Wand2 size={16} /> Agenda encantada del finde</div>
+            <div className="eyebrow">
+              <Wand2 size={16} /> Agenda encantada del finde
+            </div>
             <h1>Gabriela e Ismael</h1>
             <p>Itinerario para nuestro primer fin de semana. #Noseaceptandevoluciones. #Alohomora</p>
           </div>
+
           <div className="progress-card">
-            <div className="progress-label"><Sparkles size={16} /> Plan cerrado</div>
+            <div className="progress-label">
+              <Sparkles size={16} /> Plan cerrado
+            </div>
             <div className="progress-number">{progress}%</div>
-            <div className="progress-bar"><motion.div animate={{ width: `${progress}%` }} /></div>
+            <div className="progress-bar">
+              <motion.div animate={{ width: `${progress}%` }} />
+            </div>
           </div>
         </motion.header>
 
         <div className="toolbar">
-          <div className="toolbar-copy"><Heart size={16} /><span>{loaded ? "Conectado en tiempo real" : "Cargando agenda..."}{saving && <><Loader2 className="spin" size={14} /> Guardando</>}{lastSaved && !saving ? ` · Guardado ${lastSaved}` : ""}</span></div>
-          <div className="legend"><button className="organize-all" onClick={organizeAll}>Bloquear en slots</button><span><b>Celular:</b> usa el botón “Mover” del post-it; fuera de ese botón puedes scrollear.</span></div>
+          <div className="toolbar-copy">
+            <Heart size={16} />
+            <span>
+              {loaded ? "Conectado en tiempo real" : "Cargando agenda..."}
+              {saving && (
+                <>
+                  <Loader2 className="spin" size={14} /> Guardando
+                </>
+              )}
+              {lastSaved && !saving ? ` · Guardado ${lastSaved}` : ""}
+            </span>
+          </div>
+
+          <div className="legend">
+            <button className="organize-all" onClick={organizeAll}>
+              <ArrowUpDown size={14} /> Fijar slots
+            </button>
+            <span>
+              <b>Sin drag:</b> cambia el número de slot y se intercambian. Así no se sobreponen.
+            </span>
+          </div>
         </div>
 
         <div className="planner-grid">
@@ -450,17 +485,17 @@ export default function App() {
                 notes={dayNotes}
                 onAdd={addNote}
                 onOrganizeBlock={organizeBlock}
-                renderBlockNotes={(renderDay, block, ordered, columns) =>
+                renderBlockNotes={(renderDay, block, ordered) =>
                   ordered.map((note, index) => (
                     <StickyNote
                       key={note.id}
                       note={note}
-                      slot={index}
-                      columns={columns}
+                      index={index}
+                      total={ordered.length}
                       onUpdate={updateNote}
                       onToggle={toggleNote}
                       onDelete={deleteNote}
-                      onDropToSlot={dropToSlot}
+                      onSwapSlot={swapSlot}
                     />
                   ))
                 }
@@ -469,7 +504,9 @@ export default function App() {
           })}
         </div>
 
-        <footer className="footer"><Heart size={14} /> Mapa mágico privado para ordenar el finde sin quitarle espontaneidad.</footer>
+        <footer className="footer">
+          <Heart size={14} /> Mapa mágico privado para ordenar el finde sin quitarle espontaneidad.
+        </footer>
       </div>
     </div>
   );
